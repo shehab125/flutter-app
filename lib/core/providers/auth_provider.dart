@@ -3,131 +3,246 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:smart_medical_box_app/core/models/user.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart';
 
-class AuthProvider extends ChangeNotifier {
+class AuthProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
-  
-  User? _firebaseUser;
-  AppUser? _currentUser;
-  bool _isLoading = false;
-  String? _error;
-  bool _isInitializing = true;
 
-  User? get firebaseUser => _firebaseUser;
-  AppUser? get currentUser => _currentUser;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
-  bool get isAuthenticated => _firebaseUser != null && _currentUser != null;
-  bool get isInitializing => _isInitializing;
+  AppUser? _currentUser;
+  bool _isInitializing = true;
+  String? _error;
+  bool _isOffline = false;
+  bool _isLoading = false;
 
   AuthProvider() {
-    _auth.authStateChanges().listen(_onAuthStateChanged);
+    _initializeAuth();
   }
 
-  Future<void> _onAuthStateChanged(User? firebaseUser) async {
-    if (firebaseUser == null) {
-      _firebaseUser = null;
-      _currentUser = null;
+  // Getters
+  AppUser? get currentUser => _currentUser;
+  bool get isInitializing => _isInitializing;
+  bool get isAuthenticated => _currentUser != null;
+  String? get error => _error;
+  bool get isOffline => _isOffline;
+  bool get isLoading => _isLoading;
+
+  Future<void> _initializeAuth() async {
+    try {
+      _auth.authStateChanges().listen((User? firebaseUser) async {
+        if (firebaseUser == null) {
+          _currentUser = null;
+          _isInitializing = false;
+          notifyListeners();
+        } else {
+          // Don't set a default user immediately, wait for Firestore data
+          _isInitializing = true;
+          notifyListeners();
+
+          // Load user data from Firestore to get the correct user type
+          await _loadUserDataFromFirestore(firebaseUser);
+        }
+      });
+    } catch (e) {
+      _error = e.toString();
       _isInitializing = false;
       notifyListeners();
-      return;
     }
+  }
 
+  Future<void> _loadUserDataFromFirestore(User firebaseUser) async {
     try {
-      _firebaseUser = firebaseUser;
-      
-      final userDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
-      if (userDoc.exists) {
-        _currentUser = AppUser.fromMap(userDoc.data()!, firebaseUser.uid);
-        _error = null;
+      // Try to get user document
+      final doc = await _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      if (doc.exists) {
+        final userData = doc.data() as Map<String, dynamic>;
+        print('Loaded user data: $userData'); // Debug log
+
+        // Convert userType string to enum
+        String userTypeStr = userData['userType'] ?? 'patient';
+        UserType userType = userTypeStr.toLowerCase() == 'doctor'
+            ? UserType.doctor
+            : UserType.patient;
+
+        print('Determined user type: $userType'); // Debug log
+
+        _currentUser = AppUser(
+          id: firebaseUser.uid,
+          email: userData['email'] ?? '',
+          name: userData['name'] ?? '',
+          phoneNumber: userData['phoneNumber'] ?? '',
+          address: userData['address'] ?? '',
+          userType: userType,
+          createdAt: (userData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          updatedAt: (userData['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          additionalData: userData['additionalData'] as Map<String, dynamic>?,
+        );
+
+        print('Current user updated: ${_currentUser?.userType}'); // Debug log
       } else {
-        _error = 'لم يتم العثور على بيانات المستخدم في قاعدة البيانات';
-        _currentUser = null;
-        await signOut();
+        print('User document not found, creating default'); // Debug log
+        // Create new user document if it doesn't exist
+        final defaultUser = AppUser(
+          id: firebaseUser.uid,
+          email: firebaseUser.email ?? '',
+          name: firebaseUser.displayName ?? 'مستخدم جديد',
+          userType: UserType.patient, // Default for new users
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+
+        await _firestore.collection('users').doc(firebaseUser.uid).set(
+          defaultUser.toMap(),
+          SetOptions(merge: true),
+        );
+
+        _currentUser = defaultUser;
       }
     } catch (e) {
-      _error = 'حدث خطأ أثناء تحميل بيانات المستخدم: ${e.toString()}';
-      _currentUser = null;
-      await signOut();
+      print('Error loading user data: $e');
+      // Create a basic user as fallback
+      _currentUser = AppUser(
+        id: firebaseUser.uid,
+        email: firebaseUser.email ?? '',
+        name: firebaseUser.displayName ?? 'مستخدم جديد',
+        userType: UserType.patient, // Fallback type
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      _isOffline = true;
     } finally {
       _isInitializing = false;
       notifyListeners();
     }
   }
 
-  Future<bool> signIn(String email, String password) async {
+  // This method is replaced by _loadUserDataFromFirestore
+  // Keeping it for backward compatibility but it's no longer used
+  Future<void> _loadUserDataInBackground(User firebaseUser) async {
+    // Delegate to the new method
+    await _loadUserDataFromFirestore(firebaseUser);
+  }
+
+  Future<void> signInWithEmailAndPassword(String email, String password) async {
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
-      
-      if (email.isEmpty || password.isEmpty) {
-        _error = 'الرجاء إدخال البريد الإلكتروني وكلمة المرور';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
 
-      await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
+      // Sign in with Firebase Auth
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
         password: password,
       );
-      
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _isLoading = false;
-      switch (e.code) {
-        case 'user-not-found':
-          _error = 'لم يتم العثور على حساب بهذا البريد الإلكتروني';
-          break;
-        case 'wrong-password':
-          _error = 'كلمة المرور غير صحيحة';
-          break;
-        case 'invalid-email':
-          _error = 'البريد الإلكتروني غير صالح';
-          break;
-        case 'user-disabled':
-          _error = 'تم تعطيل هذا الحساب. الرجاء التواصل مع الدعم الفني';
-          break;
-        case 'too-many-requests':
-          _error = 'تم تجاوز عدد المحاولات المسموح بها. الرجاء المحاولة لاحقاً';
-          break;
-        case 'operation-not-allowed':
-          _error = 'تم تعطيل تسجيل الدخول بالبريد الإلكتروني وكلمة المرور';
-          break;
-        default:
-          _error = 'حدث خطأ أثناء تسجيل الدخول: ${e.message}';
+
+      if (userCredential.user != null) {
+        // Get user data from Firestore
+        final doc = await _firestore
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get();
+
+        if (doc.exists) {
+          final userData = doc.data() as Map<String, dynamic>;
+          print('Login - Found user data: $userData'); // Debug log
+
+          // Explicitly handle user type conversion
+          String userTypeStr = userData['userType'] ?? 'patient';
+          UserType userType = userTypeStr.toLowerCase() == 'doctor'
+              ? UserType.doctor
+              : UserType.patient;
+
+          print('Login - User type from Firestore: $userTypeStr, converted to: $userType');
+
+          _currentUser = AppUser(
+            id: userCredential.user!.uid,
+            email: userData['email'] ?? '',
+            name: userData['name'] ?? '',
+            phoneNumber: userData['phoneNumber'] ?? '',
+            address: userData['address'] ?? '',
+            userType: userType,
+            createdAt: (userData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            updatedAt: (userData['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            additionalData: userData['additionalData'] as Map<String, dynamic>?,
+          );
+
+          print('Login - Current user set with type: ${_currentUser?.userType}');
+          _error = null;
+        } else {
+          _error = 'لم يتم العثور على بيانات المستخدم';
+          await _auth.signOut();
+          _currentUser = null;
+        }
       }
-      notifyListeners();
-      return false;
+    } on FirebaseAuthException catch (e) {
+      _error = _getMessageFromErrorCode(e.code);
+      _currentUser = null;
     } catch (e) {
+      _error = 'حدث خطأ أثناء تسجيل الدخول';
+      print('Login error: $e');
+      _currentUser = null;
+    } finally {
       _isLoading = false;
-      _error = 'حدث خطأ غير متوقع: ${e.toString()}';
       notifyListeners();
-      return false;
+    }
+  }
+
+  String _getMessageFromErrorCode(String errorCode) {
+    switch (errorCode) {
+      case 'invalid-email':
+        return 'البريد الإلكتروني غير صالح';
+      case 'user-disabled':
+        return 'تم تعطيل هذا الحساب';
+      case 'user-not-found':
+        return 'لم يتم العثور على مستخدم بهذا البريد الإلكتروني';
+      case 'wrong-password':
+        return 'كلمة المرور غير صحيحة';
+      case 'network-request-failed':
+        return 'فشل الاتصال بالشبكة';
+      case 'too-many-requests':
+        return 'تم تجاوز عدد محاولات تسجيل الدخول المسموح بها. الرجاء المحاولة لاحقاً';
+      case 'unavailable':
+        return 'الخدمة غير متوفرة حالياً. الرجاء المحاولة لاحقاً';
+      default:
+        return 'حدث خطأ غير متوقع: $errorCode';
+    }
+  }
+
+  Future<void> signOut() async {
+    try {
+      await _auth.signOut();
+      _currentUser = null;
+      _error = null;
+      notifyListeners();
+    } catch (e) {
+      _error = 'حدث خطأ أثناء تسجيل الخروج: ${e.toString()}';
+      notifyListeners();
+      throw _error!;
     }
   }
 
   Future<bool> signUp(
-    String email,
-    String password,
-    String name,
-    String phone,
-    String address,
-    String userType,
-    Map<String, dynamic>? additionalData,
-  ) async {
+      String email,
+      String password,
+      String name,
+      String phoneNumber,
+      String address,
+      String userType,
+      Map<String, dynamic>? additionalData,
+      ) async {
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
 
-      // التحقق من صحة البيانات
-      if (email.isEmpty || password.isEmpty || name.isEmpty || phone.isEmpty || address.isEmpty) {
+      print('Starting signup process for userType: $userType'); // Debug log
+
+      if (email.isEmpty || password.isEmpty || name.isEmpty || phoneNumber.isEmpty || address.isEmpty) {
         _error = 'الرجاء إدخال جميع البيانات المطلوبة';
         _isLoading = false;
         notifyListeners();
@@ -140,124 +255,85 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
         return false;
       }
-      
+
+      // Create user with email and password
       final userCredential = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-      
+
       final user = userCredential.user;
       if (user != null) {
-        UserType type = userType.toLowerCase() == 'doctor'
-            ? UserType.doctor
-            : UserType.patient;
-        
-        final appUser = AppUser(
+        // Convert userType string to enum
+        final type = userType.toLowerCase() == 'doctor' ? UserType.doctor : UserType.patient;
+        print('User type determined as: $type'); // Debug log
+
+        // Create user data map
+        final userData = {
+          'id': user.uid,
+          'email': email.trim(),
+          'name': name.trim(),
+          'phoneNumber': phoneNumber.trim(),
+          'address': address.trim(),
+          'userType': userType.toLowerCase(), // Store as lowercase string
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          if (additionalData != null) ...additionalData,
+        };
+
+        print('Saving user data: $userData'); // Debug log
+
+        // Save user data to Firestore
+        await _firestore.collection('users').doc(user.uid).set(userData);
+
+        // Create AppUser instance
+        _currentUser = AppUser(
           id: user.uid,
           email: email.trim(),
           name: name.trim(),
-          phone: phone.trim(),
+          phoneNumber: phoneNumber.trim(),
           address: address.trim(),
           userType: type,
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
           additionalData: additionalData,
         );
-        
-        await _firestore.collection('users').doc(user.uid).set(appUser.toMap());
-        
-        _currentUser = appUser;
+
+        print('Current user set as: ${_currentUser?.userType}'); // Debug log
+
+        // Verify the user type was saved correctly
+        final savedDoc = await _firestore.collection('users').doc(user.uid).get();
+        if (savedDoc.exists) {
+          final savedData = savedDoc.data() as Map<String, dynamic>;
+          print('Verified saved user type: ${savedData['userType']}'); // Debug log
+        }
+
+        _isLoading = false;
+        notifyListeners();
+        return true;
       }
-      
+
       _isLoading = false;
-      notifyListeners();
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _isLoading = false;
-      switch (e.code) {
-        case 'weak-password':
-          _error = 'كلمة المرور ضعيفة جداً. يجب أن تكون 6 أحرف على الأقل';
-          break;
-        case 'email-already-in-use':
-          _error = 'البريد الإلكتروني مستخدم بالفعل. الرجاء استخدام بريد إلكتروني آخر';
-          break;
-        case 'invalid-email':
-          _error = 'البريد الإلكتروني غير صالح';
-          break;
-        case 'operation-not-allowed':
-          _error = 'تم تعطيل إنشاء الحسابات بالبريد الإلكتروني وكلمة المرور';
-          break;
-        case 'too-many-requests':
-          _error = 'تم تجاوز عدد المحاولات المسموح بها. الرجاء المحاولة لاحقاً';
-          break;
-        default:
-          _error = 'حدث خطأ أثناء إنشاء الحساب: ${e.message}';
-      }
       notifyListeners();
       return false;
     } catch (e) {
+      print('Error during signup: $e'); // Debug log
       _isLoading = false;
-      _error = 'حدث خطأ غير متوقع: ${e.toString()}';
+      _error = e is FirebaseAuthException
+          ? _getMessageFromErrorCode(e.code)
+          : 'حدث خطأ أثناء إنشاء الحساب';
       notifyListeners();
       return false;
-    }
-  }
-
-  Future<void> signOut() async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      // تسجيل الخروج من Firebase Auth
-      await _auth.signOut();
-      
-      // تسجيل الخروج من Google
-      if (_googleSignIn.currentUser != null) {
-        await _googleSignIn.signOut();
-      }
-      
-      // إعادة تعيين حالة المستخدم
-      _firebaseUser = null;
-      _currentUser = null;
-      _error = null;
-      
-    } catch (e) {
-      _error = 'حدث خطأ أثناء تسجيل الخروج: ${e.toString()}';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
   }
 
   Future<bool> resetPassword(String email) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-      
       await _auth.sendPasswordResetEmail(email: email);
-      
-      _isLoading = false;
       notifyListeners();
       return true;
-    } on FirebaseAuthException catch (e) {
-      _isLoading = false;
-      switch (e.code) {
-        case 'user-not-found':
-          _error = 'لم يتم العثور على مستخدم بهذا البريد الإلكتروني';
-          break;
-        case 'invalid-email':
-          _error = 'البريد الإلكتروني غير صالح';
-          break;
-        default:
-          _error = 'حدث خطأ أثناء إرسال رابط إعادة تعيين كلمة المرور: ${e.message}';
-      }
-      notifyListeners();
-      return false;
     } catch (e) {
-      _isLoading = false;
-      _error = 'حدث خطأ غير متوقع';
+      _error = _getMessageFromErrorCode((e as FirebaseAuthException).code);
       notifyListeners();
       return false;
     }
@@ -265,25 +341,12 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> updateUserProfile(Map<String, dynamic> data) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-      
-      if (_firebaseUser != null && _currentUser != null) {
-        await _firestore.collection('users').doc(_firebaseUser!.uid).update(data);
-        
-        // Update current user
-        final userDoc = await _firestore.collection('users').doc(_firebaseUser!.uid).get();
-        if (userDoc.exists) {
-          _currentUser = AppUser.fromMap(userDoc.data()!, _firebaseUser!.uid);
-        }
+      if (_currentUser != null) {
+        await _firestore.collection('users').doc(_currentUser!.id).update(data);
+        await _loadUserDataInBackground(await _auth.currentUser!);
       }
-      
-      _isLoading = false;
-      notifyListeners();
       return true;
     } catch (e) {
-      _isLoading = false;
       _error = 'حدث خطأ أثناء تحديث الملف الشخصي';
       notifyListeners();
       return false;
@@ -296,10 +359,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   void reset() {
-    _firebaseUser = null;
     _currentUser = null;
     _error = null;
-    _isLoading = false;
+    _isInitializing = false;
     notifyListeners();
   }
 }

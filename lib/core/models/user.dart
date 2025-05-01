@@ -4,124 +4,75 @@ enum UserType { patient, doctor }
 
 class AppUser {
   final String id;
-  final String email;
   final String name;
-  final String phone;
-  final String address;
+  final String email;
   final UserType userType;
-  final String? profileImageUrl;
+  final String? phoneNumber;
+  final String? photoUrl;
+  final String? address;
   final DateTime createdAt;
   final DateTime updatedAt;
   final Map<String, dynamic>? additionalData;
 
   AppUser({
     required this.id,
-    required this.email,
     required this.name,
-    required this.phone,
-    required this.address,
+    required this.email,
     required this.userType,
-    this.profileImageUrl,
-    required this.createdAt,
-    required this.updatedAt,
+    this.phoneNumber,
+    this.photoUrl,
+    this.address,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     this.additionalData,
-  });
+  }) : this.createdAt = createdAt ?? DateTime.now(),
+       this.updatedAt = updatedAt ?? DateTime.now();
 
-  factory AppUser.fromJson(Map<String, dynamic> json) {
+  factory AppUser.fromMap(Map<String, dynamic> map) {
+    // Improved user type handling
+    UserType userType;
+    final userTypeStr = map['userType'];
+    
+    if (userTypeStr is String) {
+      // Handle both formats: "doctor" and "UserType.doctor"
+      final normalizedType = userTypeStr.contains('.') 
+          ? userTypeStr.split('.').last.toLowerCase()
+          : userTypeStr.toLowerCase();
+          
+      userType = normalizedType == 'doctor' ? UserType.doctor : UserType.patient;
+      print('User.fromMap - Parsed userType: $normalizedType to $userType');
+    } else {
+      userType = UserType.patient;
+      print('User.fromMap - Using default userType: $userType');
+    }
+    
     return AppUser(
-      id: json['id'] ?? '',
-      email: json['email'] ?? '',
-      name: json['name'] ?? '',
-      phone: json['phone'] ?? '',
-      address: json['address'] ?? '',
-      userType: json['userType'] == 'doctor' ? UserType.doctor : UserType.patient,
-      profileImageUrl: json['profileImageUrl'],
-      createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'])
-          : DateTime.now(),
-      updatedAt: json['updatedAt'] != null
-          ? DateTime.parse(json['updatedAt'])
-          : DateTime.now(),
-      additionalData: json['additionalData'],
+      id: map['id'] as String,
+      name: map['name'] as String,
+      email: map['email'] as String,
+      userType: userType,
+      phoneNumber: map['phoneNumber'] as String?,
+      photoUrl: map['photoUrl'] as String?,
+      address: map['address'] as String?,
+      createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : null,
+      updatedAt: map['updatedAt'] != null ? DateTime.parse(map['updatedAt']) : null,
+      additionalData: map['additionalData'] as Map<String, dynamic>?,
     );
-  }
-
-  factory AppUser.fromMap(Map<String, dynamic> data, String uid) {
-    return AppUser(
-      id: uid,
-      email: data['email'] ?? '',
-      name: data['name'] ?? '',
-      phone: data['phone'] ?? '',
-      address: data['address'] ?? '',
-      userType: data['userType'] == 'doctor' ? UserType.doctor : UserType.patient,
-      profileImageUrl: data['profileImageUrl'],
-      createdAt: data['createdAt'] != null
-          ? data['createdAt'] is DateTime
-              ? data['createdAt']
-              : DateTime.parse(data['createdAt'])
-          : DateTime.now(),
-      updatedAt: data['updatedAt'] != null
-          ? data['updatedAt'] is DateTime
-              ? data['updatedAt']
-              : DateTime.parse(data['updatedAt'])
-          : DateTime.now(),
-      additionalData: data['additionalData'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'email': email,
-      'name': name,
-      'phone': phone,
-      'address': address,
-      'userType': userType == UserType.doctor ? 'doctor' : 'patient',
-      'profileImageUrl': profileImageUrl,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
-      'additionalData': additionalData,
-    };
   }
 
   Map<String, dynamic> toMap() {
     return {
-      'email': email,
+      'id': id,
       'name': name,
-      'phone': phone,
+      'email': email,
+      'userType': userType.toString().split('.').last,
+      'phoneNumber': phoneNumber,
+      'photoUrl': photoUrl,
       'address': address,
-      'userType': userType == UserType.doctor ? 'doctor' : 'patient',
-      'profileImageUrl': profileImageUrl,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'additionalData': additionalData,
     };
-  }
-
-  AppUser copyWith({
-    String? id,
-    String? email,
-    String? name,
-    String? phone,
-    String? address,
-    UserType? userType,
-    String? profileImageUrl,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-    Map<String, dynamic>? additionalData,
-  }) {
-    return AppUser(
-      id: id ?? this.id,
-      email: email ?? this.email,
-      name: name ?? this.name,
-      phone: phone ?? this.phone,
-      address: address ?? this.address,
-      userType: userType ?? this.userType,
-      profileImageUrl: profileImageUrl ?? this.profileImageUrl,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-      additionalData: additionalData ?? this.additionalData,
-    );
   }
 }
 
@@ -137,13 +88,13 @@ class Patient extends AppUser {
 
   Patient({
     required String id,
-    required String email,
     required String name,
-    required String phone,
-    required String address,
-    String? profileImageUrl,
-    required DateTime createdAt,
-    required DateTime updatedAt,
+    required String email,
+    String? phoneNumber,
+    String? address,
+    String? photoUrl,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     Map<String, dynamic>? additionalData,
     this.emergencyContact,
     this.medicalHistory,
@@ -155,81 +106,37 @@ class Patient extends AppUser {
     this.weight,
   }) : super(
           id: id,
-          email: email,
           name: name,
-          phone: phone,
-          address: address,
+          email: email,
           userType: UserType.patient,
-          profileImageUrl: profileImageUrl,
+          phoneNumber: phoneNumber,
+          photoUrl: photoUrl,
+          address: address,
           createdAt: createdAt,
           updatedAt: updatedAt,
           additionalData: additionalData,
         );
 
-  factory Patient.fromAppUser(AppUser user, {
-    String? emergencyContact,
-    String? medicalHistory,
-    List<String>? allergies,
-    String? bloodType,
-    DateTime? dateOfBirth,
-    String? gender,
-    double? height,
-    double? weight,
-  }) {
+  factory Patient.fromMap(Map<String, dynamic> map) {
     return Patient(
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      phone: user.phone,
-      address: user.address,
-      profileImageUrl: user.profileImageUrl,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-      additionalData: user.additionalData,
-      emergencyContact: emergencyContact,
-      medicalHistory: medicalHistory,
-      allergies: allergies,
-      bloodType: bloodType,
-      dateOfBirth: dateOfBirth,
-      gender: gender,
-      height: height,
-      weight: weight,
+      id: map['id'] as String,
+      name: map['name'] as String,
+      email: map['email'] as String,
+      phoneNumber: map['phoneNumber'] as String?,
+      address: map['address'] as String?,
+      photoUrl: map['photoUrl'] as String?,
+      createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : null,
+      updatedAt: map['updatedAt'] != null ? DateTime.parse(map['updatedAt']) : null,
+      additionalData: map['additionalData'] as Map<String, dynamic>?,
+      emergencyContact: map['emergencyContact'] as String?,
+      medicalHistory: map['medicalHistory'] as String?,
+      allergies: map['allergies'] != null ? List<String>.from(map['allergies']) : null,
+      bloodType: map['bloodType'] as String?,
+      dateOfBirth: map['dateOfBirth'] != null ? DateTime.parse(map['dateOfBirth']) : null,
+      gender: map['gender'] as String?,
+      height: map['height']?.toDouble(),
+      weight: map['weight']?.toDouble(),
     );
-  }
-
-  factory Patient.fromJson(Map<String, dynamic> json) {
-    final appUser = AppUser.fromJson(json);
-    return Patient.fromAppUser(
-      appUser,
-      emergencyContact: json['emergencyContact'],
-      medicalHistory: json['medicalHistory'],
-      allergies: json['allergies'] != null
-          ? List<String>.from(json['allergies'])
-          : null,
-      bloodType: json['bloodType'],
-      dateOfBirth: json['dateOfBirth'] != null
-          ? DateTime.parse(json['dateOfBirth'])
-          : null,
-      gender: json['gender'],
-      height: json['height']?.toDouble(),
-      weight: json['weight']?.toDouble(),
-    );
-  }
-
-  @override
-  Map<String, dynamic> toJson() {
-    final json = super.toJson();
-    json.addAll({
-      'emergencyContact': emergencyContact,
-      'medicalHistory': medicalHistory,
-      'allergies': allergies,
-      'bloodType': bloodType,
-      'dateOfBirth': dateOfBirth?.toIso8601String(),
-      'gender': gender,
-      'height': height,
-      'weight': weight,
-    });
-    return json;
   }
 
   @override
@@ -260,13 +167,13 @@ class Doctor extends AppUser {
 
   Doctor({
     required String id,
-    required String email,
     required String name,
-    required String phone,
-    required String address,
-    String? profileImageUrl,
-    required DateTime createdAt,
-    required DateTime updatedAt,
+    required String email,
+    String? phoneNumber,
+    String? address,
+    String? photoUrl,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     Map<String, dynamic>? additionalData,
     this.specialization,
     this.licenseNumber,
@@ -277,75 +184,36 @@ class Doctor extends AppUser {
     this.availability,
   }) : super(
           id: id,
-          email: email,
           name: name,
-          phone: phone,
-          address: address,
+          email: email,
           userType: UserType.doctor,
-          profileImageUrl: profileImageUrl,
+          phoneNumber: phoneNumber,
+          photoUrl: photoUrl,
+          address: address,
           createdAt: createdAt,
           updatedAt: updatedAt,
           additionalData: additionalData,
         );
 
-  factory Doctor.fromAppUser(AppUser user, {
-    String? specialization,
-    String? licenseNumber,
-    String? hospital,
-    String? bio,
-    List<String>? certifications,
-    int? yearsOfExperience,
-    Map<String, dynamic>? availability,
-  }) {
+  factory Doctor.fromMap(Map<String, dynamic> map) {
     return Doctor(
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      phone: user.phone,
-      address: user.address,
-      profileImageUrl: user.profileImageUrl,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-      additionalData: user.additionalData,
-      specialization: specialization,
-      licenseNumber: licenseNumber,
-      hospital: hospital,
-      bio: bio,
-      certifications: certifications,
-      yearsOfExperience: yearsOfExperience,
-      availability: availability,
+      id: map['id'] as String,
+      name: map['name'] as String,
+      email: map['email'] as String,
+      phoneNumber: map['phoneNumber'] as String?,
+      address: map['address'] as String?,
+      photoUrl: map['photoUrl'] as String?,
+      createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : null,
+      updatedAt: map['updatedAt'] != null ? DateTime.parse(map['updatedAt']) : null,
+      additionalData: map['additionalData'] as Map<String, dynamic>?,
+      specialization: map['specialization'] as String?,
+      licenseNumber: map['licenseNumber'] as String?,
+      hospital: map['hospital'] as String?,
+      bio: map['bio'] as String?,
+      certifications: map['certifications'] != null ? List<String>.from(map['certifications']) : null,
+      yearsOfExperience: map['yearsOfExperience'] as int?,
+      availability: map['availability'] as Map<String, dynamic>?,
     );
-  }
-
-  factory Doctor.fromJson(Map<String, dynamic> json) {
-    final appUser = AppUser.fromJson(json);
-    return Doctor.fromAppUser(
-      appUser,
-      specialization: json['specialization'],
-      licenseNumber: json['licenseNumber'],
-      hospital: json['hospital'],
-      bio: json['bio'],
-      certifications: json['certifications'] != null
-          ? List<String>.from(json['certifications'])
-          : null,
-      yearsOfExperience: json['yearsOfExperience'],
-      availability: json['availability'],
-    );
-  }
-
-  @override
-  Map<String, dynamic> toJson() {
-    final json = super.toJson();
-    json.addAll({
-      'specialization': specialization,
-      'licenseNumber': licenseNumber,
-      'hospital': hospital,
-      'bio': bio,
-      'certifications': certifications,
-      'yearsOfExperience': yearsOfExperience,
-      'availability': availability,
-    });
-    return json;
   }
 
   @override

@@ -25,7 +25,7 @@ flutter pub get
 ```
 
 4. إعداد Firebase:
-   - قم بإنشاء مشروع جديد في [Firebase Console](https://console.firebase.google.com)
+   - قم بإنشاء مشروع جديد في Firebase Console
    - قم بإضافة تطبيق Android جديد
    - قم بتحميل ملف `google-services.json` وضعه في `android/app/`
    - قم بتمكين Authentication وتفعيل Email/Password sign-in
